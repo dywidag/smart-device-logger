@@ -8,6 +8,16 @@ import (
 	"time"
 )
 
+// writeError marks a failure to write a record — a full disk, a read-only
+// mount, a closed pipe. It is told apart from a read failure because the two
+// deserve opposite answers: a device that stops talking is reconnected to,
+// while a log that cannot be written must stop the capture loudly rather
+// than spin reopening a device whose data has nowhere to go.
+type writeError struct{ err error }
+
+func (e writeError) Error() string { return e.err.Error() }
+func (e writeError) Unwrap() error { return e.err }
+
 // stream copies src to dst one line at a time, stamping each line with the
 // time it was read. It returns nil at end of input, and ctx.Err() if the
 // context is cancelled between reads. Whatever is pending when it returns
@@ -26,7 +36,7 @@ func stream(ctx context.Context, dst io.Writer, src io.Reader, now func() time.T
 	)
 	emit := func(line []byte) error {
 		if _, err := dst.Write(record(now(), line)); err != nil {
-			return fmt.Errorf("write log line: %w", err)
+			return writeError{fmt.Errorf("write log line: %w", err)}
 		}
 		return nil
 	}

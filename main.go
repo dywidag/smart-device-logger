@@ -66,7 +66,9 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	portName := flags.String("port", "", "serial device: a path, a bare name such as ttyUSB0, or a /dev/serial/by-id entry (default: the only device present)")
 	logDir := flags.String("log-dir", "", "directory to write daily log files into (default ~/.local/state/smart-device-logger)")
 	prefix := flags.String("log-prefix", "session", "leading part of each log file name")
+	keepDays := flags.Int("keep-days", 0, "delete daily files older than this many days at each rollover (0 = keep everything)")
 	readTimeout := flags.Duration("read-timeout", 200*time.Millisecond, "how long a read waits for data before checking for Ctrl-C")
+	reconnecting := flags.Bool("reconnect", true, "reopen the device after an unplug instead of exiting")
 	showVersion := flags.Bool("version", false, "print the version and exit")
 
 	if err := flags.Parse(args); err != nil {
@@ -86,29 +88,37 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		return nil
 	}
 
-	path := *portName
-	if path == "" {
+	// resolve names the device to open, now and after every unplug: a
+	// given --port as it stands, and otherwise whatever single device is
+	// present, because a replugged adapter comes back as a different
+	// /dev/ttyUSBn while its by-id link stays put.
+	resolve := func() (device, error) {
+		if *portName != "" {
+			path := devicePath(*portName)
+			return device{path: path, target: path}, nil
+		}
 		devices, err := discover(byIDDir, serial.GetPortsList)
 		if err != nil {
-			return err
+			return device{}, err
 		}
-		chosen, err := pick(devices)
-		if err != nil {
-			return err
-		}
-		path = chosen.path
-		fmt.Fprintf(stderr, "using the only serial device present: %s\n", chosen)
-	} else {
-		path = devicePath(path)
+		return pick(devices)
 	}
+
+	chosen, err := resolve()
+	if err != nil {
+		return err
+	}
+	if *portName == "" {
+		fmt.Fprintf(stderr, "using the only serial device present: %s\n", chosen)
+	}
+	path := chosen.path
 
 	port, err := openPort(path, *readTimeout)
 	if err != nil {
 		return err
 	}
-	defer port.Close()
 
-	daily := NewDailyWriter(*logDir, *prefix)
+	daily := NewDailyWriter(*logDir, *prefix, *keepDays)
 	defer daily.Close()
 
 	fmt.Fprintf(stderr, "%s open at 115200 8N1 (Ctrl-C to stop)\n", path)
@@ -133,27 +143,46 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	go func() { st.run(statusDone); close(statusStopped) }()
 	defer func() { close(statusDone); <-statusStopped }()
 
-	// The port's read timeout means stream sees a cancelled context within
-	// one timeout of Ctrl-C. Closing the port as well wakes a read at once,
-	// and the bounded wait keeps the exit prompt even if the reader is
-	// mid-line. Nothing already written is lost: DailyWriter has no buffer.
+	// Notes go through the same writer as data lines so they land above
+	// the status block rather than through the middle of it.
+	notes := st.screen(stderr)
+
+	var reopen *reconnect
+	if *reconnecting {
+		reopen = &reconnect{
+			open: func() (io.ReadCloser, string, error) {
+				next, err := resolve()
+				if err != nil {
+					return nil, "", err
+				}
+				port, err := openPort(next.path, *readTimeout)
+				if err != nil {
+					return nil, "", err
+				}
+				return st.count(port), next.path, nil
+			},
+			onOpen: func(path string) { st.setDevice(path, adapterName(path)) },
+			report: func(text string) { fmt.Fprintf(notes, "smart-device-logger: %s\n", text) },
+		}
+	}
+
+	// capture owns the port from here, including closing it: closing is
+	// how a read blocked in the driver is woken on Ctrl-C, and how a lost
+	// device is let go of before the next open. The bounded wait keeps the
+	// exit prompt even if a read is wedged. Nothing already written is
+	// lost: DailyWriter has no buffer of its own.
 	done := make(chan error, 1)
 	go func() {
-		done <- stream(ctx, io.MultiWriter(st.screen(stdout), daily, st), st.reader(port), time.Now)
+		done <- capture(ctx, io.MultiWriter(st.screen(stdout), daily, st), time.Now, st.count(port), path, reopen)
 	}()
 
 	select {
 	case err := <-done:
-		if ctx.Err() != nil {
-			// A cancelled context is how the tool is meant to stop,
-			// not a failure.
-			return nil
-		}
 		return err
 	case <-ctx.Done():
-		port.Close()
 		select {
-		case <-done:
+		case err := <-done:
+			return err
 		case <-time.After(time.Second):
 		}
 		return nil

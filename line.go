@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"time"
 	"unicode/utf8"
 )
@@ -14,18 +15,34 @@ const stampLayout = "2006-01-02T15:04:05.000Z07:00"
 // until the result arrives; 200 ms matches the web logger's idle flush.
 const idleFlush = 200 * time.Millisecond
 
+// maxLine caps the pending buffer. A device that talks without ever sending
+// a terminator — the wrong baud rate, wedged firmware, noise on the lead —
+// would otherwise be held in memory in full: the pending slice doubles as it
+// grows, so 256 MiB of terminator-free traffic costs about 770 MiB of heap
+// and kills the process on a Pi long before it fills the disk. The idle
+// flush is no defence, because it only fires on a read that returns nothing.
+//
+// 64 KiB is 200 times the longest line the device is known to send (a
+// 311-character +COPS answer), so reaching it means something is wrong
+// rather than verbose.
+const maxLine = 64 << 10
+
+// cutMark is appended to a line the cap ended, so the record explains its
+// own shape instead of looking like a device that emits 64 KiB lines.
+var cutMark = []byte(fmt.Sprintf(" --- cut at %d bytes, line continues ---", maxLine))
+
 // lineSplitter cuts a byte stream into lines on \r\n, lone \n and lone \r,
 // dropping the terminator. Bytes after the last terminator stay pending
-// until the next chunk or an idle flush. There is no line length cap: the
-// pending buffer grows to whatever the device sends.
+// until the next chunk or an idle flush, up to maxLine.
 //
 // A \r ends the line the moment it arrives, and a \n straight after it is
 // swallowed so CRLF still counts once. That gives the same lines as holding
 // the \r back until the next read, without delaying a lone-CR line by a
 // whole read timeout.
 type lineSplitter struct {
-	pending []byte
-	skipLF  bool // the last byte seen was \r, so a following \n is the rest of CRLF
+	pending   []byte
+	skipLF    bool // the last byte seen was \r, so a following \n is the rest of CRLF
+	overflown bool // the cap just ended a line, so the next terminator is not a blank one
 }
 
 // push feeds chunk in, calling emit once per completed line with the line's
@@ -47,8 +64,13 @@ func (s *lineSplitter) push(chunk []byte, emit func([]byte) error) error {
 			}
 			s.skipLF = true
 		default:
-			s.skipLF = false
+			s.skipLF, s.overflown = false, false
 			s.pending = append(s.pending, b)
+			if len(s.pending) >= maxLine {
+				if err := s.overflow(emit); err != nil {
+					return err
+				}
+			}
 		}
 	}
 	return nil
@@ -64,8 +86,24 @@ func (s *lineSplitter) flush(emit func([]byte) error) error {
 }
 
 func (s *lineSplitter) cut(emit func([]byte) error) error {
+	if len(s.pending) == 0 && s.overflown {
+		// The cap has already emitted these bytes; the terminator that
+		// finally arrives ends nothing and is not a blank line.
+		s.overflown = false
+		return nil
+	}
 	err := emit(s.pending)
 	s.pending = s.pending[:0]
+	return err
+}
+
+// overflow emits a line the cap ended, marked, and keeps the splitter at a
+// line boundary so the bytes that follow start a fresh line.
+func (s *lineSplitter) overflow(emit func([]byte) error) error {
+	s.pending = append(s.pending, cutMark...)
+	err := emit(s.pending)
+	s.pending = s.pending[:0]
+	s.overflown = true
 	return err
 }
 

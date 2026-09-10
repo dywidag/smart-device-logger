@@ -168,6 +168,75 @@ func TestRun(t *testing.T) {
 			t.Fatal("run did not return after the context was cancelled")
 		}
 	})
+
+	t.Run("an unplug does not end the capture", func(t *testing.T) {
+		dev := openFake(t)
+		dir := t.TempDir()
+		var stdout, stderr syncBuffer
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		returned := make(chan error, 1)
+		args := []string{"--port", dev.Path, "--log-dir", dir, "--log-prefix", "device"}
+		go func() { returned <- run(ctx, args, &stdout, &stderr) }()
+
+		waitFor(t, &stderr, dev.Path+" open at")
+		if err := dev.Send("before\n"); err != nil {
+			t.Fatalf("send: %v", err)
+		}
+		waitFor(t, &stdout, " before\n")
+
+		// Pull the lead. The path itself goes with it, so every reopen
+		// fails: what is being tested is that the tool keeps trying
+		// instead of exiting, and says so in the log.
+		if err := dev.Unplug(); err != nil {
+			t.Fatalf("unplug: %v", err)
+		}
+		waitFor(t, &stdout, "--- device disconnected: "+dev.Path)
+		waitFor(t, &stderr, "reconnecting")
+
+		select {
+		case err := <-returned:
+			t.Fatalf("run returned %v after an unplug, want it still capturing", err)
+		case <-time.After(750 * time.Millisecond):
+		}
+
+		cancel()
+		if err := <-returned; err != nil {
+			t.Errorf("run: %v", err)
+		}
+		// The marker is in the day's file too, so the record explains its
+		// own gap without the terminal being watched.
+		name := filepath.Join(dir, "device-"+time.Now().Format(dayLayout)+".log")
+		if got := readFile(t, name); !strings.Contains(got, "--- device disconnected: ") {
+			t.Errorf("file has no disconnect marker:\n%s", got)
+		}
+	})
+
+	t.Run("--reconnect=false makes an unplug a failure", func(t *testing.T) {
+		dev := openFake(t)
+		var stdout, stderr syncBuffer
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		returned := make(chan error, 1)
+		args := []string{"--port", dev.Path, "--log-dir", t.TempDir(), "--reconnect=false"}
+		go func() { returned <- run(ctx, args, &stdout, &stderr) }()
+
+		waitFor(t, &stderr, dev.Path+" open at")
+		if err := dev.Unplug(); err != nil {
+			t.Fatalf("unplug: %v", err)
+		}
+
+		select {
+		case err := <-returned:
+			if err == nil {
+				t.Error("run returned nil after an unplug, want an error and exit 1")
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("run did not return after the device went away")
+		}
+	})
 }
 
 func TestExitStatus(t *testing.T) {

@@ -178,8 +178,8 @@ func TestStream(t *testing.T) {
 		}
 	})
 
-	t.Run("has no line length cap", func(t *testing.T) {
-		line := strings.Repeat("x", 100000)
+	t.Run("a long line is passed through whole up to the cap", func(t *testing.T) {
+		line := strings.Repeat("x", maxLine-1)
 		var out bytes.Buffer
 
 		if err := stream(context.Background(), &out, strings.NewReader(line+"\n"), fixedClock()); err != nil {
@@ -188,6 +188,60 @@ func TestStream(t *testing.T) {
 
 		if want := stamp + " " + line + "\n"; out.String() != want {
 			t.Errorf("output has %d bytes, want %d", out.Len(), len(want))
+		}
+	})
+
+	t.Run("a device that never terminates a line is cut at the cap, marked", func(t *testing.T) {
+		// 3.5 caps' worth of bytes and no terminator anywhere: the memory
+		// this must not hold is what killed a capture on a Pi.
+		var out bytes.Buffer
+		src := strings.NewReader(strings.Repeat("M", 7*maxLine/2))
+
+		if err := stream(context.Background(), &out, src, fixedClock()); err != nil {
+			t.Fatalf("stream: %v", err)
+		}
+
+		records := strings.SplitAfter(strings.TrimSuffix(out.String(), "\n"), "\n")
+		if len(records) != 4 {
+			t.Fatalf("got %d records, want 3 cut lines and the remainder: %d bytes", len(records), out.Len())
+		}
+		for _, r := range records[:3] {
+			if want := len(stamp) + 1 + maxLine + len(cutMark) + 1; len(r) != want {
+				t.Errorf("cut record is %d bytes, want %d", len(r), want)
+			}
+			if !strings.HasSuffix(r, string(cutMark)+"\n") {
+				t.Errorf("cut record does not end with the marker: %q", r[len(r)-60:])
+			}
+		}
+		if last := records[3]; len(last) != len(stamp)+1+maxLine/2 {
+			t.Errorf("remainder is %d bytes, want the half cap left over", len(last))
+		}
+	})
+
+	t.Run("the terminator after a cut does not add a blank line", func(t *testing.T) {
+		var out bytes.Buffer
+		src := strings.NewReader(strings.Repeat("M", maxLine) + "\r\nnext\n")
+
+		if err := stream(context.Background(), &out, src, fixedClock()); err != nil {
+			t.Fatalf("stream: %v", err)
+		}
+
+		lines := strings.Count(out.String(), "\n")
+		if lines != 2 {
+			t.Errorf("got %d records, want the cut line and \"next\": %q", lines, out.String())
+		}
+		if !strings.HasSuffix(out.String(), stamp+" next\n") {
+			t.Errorf("output does not end with the next line: %q", out.String())
+		}
+	})
+
+	t.Run("a write failure while cutting is reported", func(t *testing.T) {
+		boom := errors.New("disk full")
+
+		err := stream(context.Background(), failingWriter{boom}, strings.NewReader(strings.Repeat("M", maxLine+1)), fixedClock())
+
+		if !errors.Is(err, boom) || !isWriteError(err) {
+			t.Errorf("err = %v, want a writeError wrapping %v", err, boom)
 		}
 	})
 

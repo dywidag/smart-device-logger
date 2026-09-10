@@ -65,24 +65,35 @@ func (s *status) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-// reader counts the bytes the device sends, without touching them.
-func (s *status) reader(r io.Reader) io.Reader {
-	return countingReader{r, s}
+// count counts the bytes the device sends, without touching them. It keeps
+// Close, because the port it wraps is what capture closes to wake a blocked
+// read and to let a lost device go.
+func (s *status) count(port io.ReadCloser) io.ReadCloser {
+	return countingPort{port, s}
 }
 
-type countingReader struct {
-	r io.Reader
+type countingPort struct {
+	io.ReadCloser
 	s *status
 }
 
-func (c countingReader) Read(p []byte) (int, error) {
-	n, err := c.r.Read(p)
+func (c countingPort) Read(p []byte) (int, error) {
+	n, err := c.ReadCloser.Read(p)
 	if n > 0 {
 		c.s.mu.Lock()
 		c.s.bytes += int64(n)
 		c.s.mu.Unlock()
 	}
 	return n, err
+}
+
+// setDevice renames the device in the block. A replugged adapter comes back
+// as a different /dev/ttyUSBn, and a block still naming the old one reads
+// like a capture that never moved.
+func (s *status) setDevice(port, adapter string) {
+	s.mu.Lock()
+	s.port, s.adapter = port, adapter
+	s.mu.Unlock()
 }
 
 // screen wraps the stdout writer so a data line lands above the block

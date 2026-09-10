@@ -62,6 +62,14 @@ midnight. Keep that for anything time-dependent.
   gap rather than holding it forever.
 - Lines reach 311 characters. Decoding is lossy UTF-8; byte-exact capture is
   not a goal.
+- **A hangup is not `io.EOF`.** `go.bug.st/serial` reports a disconnected
+  port as `*PortError{PortClosed}`, because Linux leaves it readable with
+  zero-length data. Both that and a plain end of input mean the device is
+  gone, never that the session finished.
+- **An unplug is routine, not exceptional.** Re-enumeration, USB autosuspend
+  and a nudged cable all happen over a run of weeks, and `/dev/ttyUSB0` can
+  come back as `ttyUSB1`. Reopening resolves the device again; it never
+  reuses the old name.
 
 ## Rules
 
@@ -74,6 +82,20 @@ midnight. Keep that for anything time-dependent.
 - A cancelled context is a clean stop, not an error. Ctrl-C is the normal way
   to end a session.
 - Never commit captured data. `.gitignore` covers `/logs/` and `*.log`.
+- **Read failures reconnect; write failures are fatal.** `writeError` exists
+  to keep them apart. A full disk or read-only card must stop the capture
+  with one error and exit 1, never spin reopening a device whose data has
+  nowhere to go.
+- **Nothing unbounded per device byte.** The pending line is capped at
+  `maxLine` and marked when cut, because a device that never sends a
+  terminator would otherwise be held in memory in full. Any new buffer needs
+  the same answer: 512 MiB of terminator-free traffic must cost a few MiB.
+- **Deleting captured data is opt-in.** `--keep-days` defaults to off, prunes
+  only names this prefix could have written, and a failed delete is ignored:
+  housekeeping must never be why a capture stops.
+- Flush the file on a throttle (`syncEvery`) rather than per line: a Pi that
+  loses power must not lose the day's tail, and an SD card must not be worn
+  out to prevent it.
 
 ## Constraints
 

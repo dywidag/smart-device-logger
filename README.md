@@ -17,6 +17,8 @@ the stream while it runs.
 | Flags, version stamping, Ctrl-C shutdown | done (`main.go`) |
 | Serial port discovery and opening | done (`device.go`) |
 | Status block on the terminal | done (`status.go`) |
+| Surviving an unplug, with markers in the log | done (`reconnect.go`) |
+| Fit for long runs: line cap, flushes, retention | done (`line.go`, `logfile.go`) |
 
 ```sh
 go build -o smart-device-logger .
@@ -107,7 +109,10 @@ unit, which is deliberately not part of this tool yet.
 --log-dir       directory to write daily log files into
                 (default ~/.local/state/smart-device-logger)
 --log-prefix    leading part of each log file name (default "session")
+--keep-days     delete daily files older than this many days at each
+                rollover (default 0: keep everything)
 --read-timeout  how long a read waits for data before checking for Ctrl-C (default 200ms)
+--reconnect     reopen the device after an unplug instead of exiting (default true)
 --version       print the version and exit
 ```
 
@@ -123,10 +128,43 @@ Invalid UTF-8 becomes U+FFFD. A two-line status block draws on stderr when
 that is a terminal, so `> capture.txt` gets data lines only, and a redirected
 stderr gets no escape sequences.
 
+A line is cut at 64 KiB and marked
+(`... --- cut at 65536 bytes, line continues ---`) so a device stuck without
+a terminator — the wrong baud rate, wedged firmware, noise on the lead —
+cannot grow the process until the kernel kills it.
+
 Files are named `<prefix>-YYYY-MM-DD.log` after the local date. Writing
 continues into an existing day's file rather than truncating it, so restarting
 the tool never loses a session. Nothing is created on disk until the first
-line arrives.
+line arrives. The file is flushed to disk at most every 5 seconds and at
+every rollover, so a power cut costs seconds of record rather than the day's
+tail. `--keep-days 14` deletes older files at each rollover, matching only
+this prefix's names; without it nothing is ever deleted.
+
+## Long runs and unplugs
+
+A USB serial device disappears from time to time — a re-enumeration, an
+autosuspend blip, a nudged cable — and by default the tool waits for it to
+come back rather than exiting. The gap is explained in the log itself:
+
+```
+2026-09-10T17:52:20.565Z --- device disconnected: /dev/ttyUSB0 (read device: Port has been closed) ---
+2026-09-10T17:52:22.326Z --- reconnected to /dev/ttyUSB1 ---
+```
+
+Retries back off from 250 ms to 5 s and continue for as long as the device is
+away. Reopening resolves the device again rather than reusing the old name,
+so an adapter that comes back as `ttyUSB1` is picked up, and the status block
+renames itself to match. `--reconnect=false` restores fail-fast for scripts:
+an unplug then exits 1.
+
+A failure to *write* is never retried. A full disk, a read-only SD card or a
+failed flush stops the capture with one clear error and exit 1, because
+reopening a device whose data has nowhere to go only loses it faster.
+
+Measured, not assumed: 480 MiB of traffic across 60 simulated days and 60
+unplugs leaves heap, goroutines and descriptors where they started, and
+512 MiB with no terminator in it costs a bounded few MiB.
 
 ## Verifying without the hardware
 
@@ -164,11 +202,16 @@ Go tools in this account. `internal/` and `cmd/` hold test scaffolding only.
   `--port` resolution, opening at 115200 8N1 with DTR/RTS dropped, and the
   permission-denied message.
 - `stream.go` — `stream` copies a reader to a writer, one line at a time,
-  reading into a byte slice so a silent device is never end-of-stream.
-- `line.go` — the line splitter, idle flush, timestamp layout and `record`.
+  reading into a byte slice so a silent device is never end-of-stream, and
+  `writeError`, which marks the failures that must stop a capture.
+- `reconnect.go` — `capture`, the loop that reopens the device after an
+  unplug, with the backoff and the log markers.
+- `line.go` — the line splitter, idle flush, 64 KiB cap, timestamp layout and
+  `record`.
 - `logfile.go` — `DailyWriter`, an `io.WriteCloser` that opens
-  `<dir>/<prefix>-YYYY-MM-DD.log` lazily and rolls over on the first write of a
-  new local day. Safe for concurrent use.
+  `<dir>/<prefix>-YYYY-MM-DD.log` lazily, rolls over on the first write of a
+  new local day, flushes on a throttle and prunes to `--keep-days`. Safe for
+  concurrent use.
 - `status.go` — the status block on stderr.
 - `version.go` — what `--version` reports, from the release ldflags stamp or
   `debug.ReadBuildInfo`.

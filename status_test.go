@@ -41,7 +41,7 @@ func TestStatusText(t *testing.T) {
 	}
 
 	// One Write is one line; bytes come from the reader, not the record.
-	src := st.reader(strings.NewReader("BOOT OK\r\nTEMP=21.4 HUM=48\r\n"))
+	src := st.count(io.NopCloser(strings.NewReader("BOOT OK\r\nTEMP=21.4 HUM=48\r\n")))
 	if _, err := io.ReadAll(src); err != nil {
 		t.Fatal(err)
 	}
