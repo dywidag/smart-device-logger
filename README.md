@@ -96,8 +96,8 @@ gives a `Device` you write to and `Unplug()` to hang the reader up.
 
 ## Layout
 
-Flat `package main`, one file per module — the same shape as the other Go tools
-in this account.
+`package main` at the root, one file per module — the same shape as the other
+Go tools in this account. `internal/` and `cmd/` hold test scaffolding only.
 
 - `main.go` — flags, signal handling, wiring. `run` is the real entry point and
   takes its arguments and streams as parameters, so tests drive it directly.
@@ -106,6 +106,17 @@ in this account.
 - `logfile.go` — `DailyWriter`, an `io.WriteCloser` that opens
   `<dir>/<prefix>-YYYY-MM-DD.log` lazily and rolls over on the first write of a
   new local day. Safe for concurrent use.
+- `version.go` — what `--version` reports, from the release ldflags stamp or
+  `debug.ReadBuildInfo`.
+- `internal/fakedev`, `cmd/fakedev` — the fake serial device above.
+
+## Where the standard lives
+
+`.wayfinder/serial-logger/ANSWER-KEY.md` is what the finished tool is judged
+against — 26 binary checks, an out-of-scope list, and three Unknowns nobody
+has decided. `MAP.md` beside it holds the reasoning for each check and the
+measured facts behind them. `PLAN.md` predates both; where they disagree, the
+map wins.
 
 ## Next pieces
 
