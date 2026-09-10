@@ -60,22 +60,41 @@ cross-compile from the dev box and `scp` the binary over.
 ## Running over SSH
 
 The tool stops when its terminal goes away, so a capture started over SSH ends
-when the connection does. Run it inside `tmux` (`sudo apt install tmux` if the
-Pi has none):
+when the connection does. Run it inside `tmux`, which keeps the terminal alive
+on the Pi whether anyone is connected or not.
+
+Once, if the Pi has no `tmux`:
 
 ```sh
-tmux new -s log          # a shell inside a session named "log"
-smart-device-logger      # start it in that shell
+sudo apt install tmux
 ```
 
-Detach with `Ctrl-B` then `D` — the app keeps logging and the SSH connection
-can be closed. `tmux attach -t log` picks the session back up with the stream
-and status block intact; `tmux ls` says what is running. `Ctrl-C` inside the
-session is still the clean stop.
+Start a capture:
 
-Start the app in the session rather than as `tmux new -s log 'smart-device-logger'`:
-with the command baked into the `new` line, the session disappears the moment
-the app exits and takes the reason with it.
+```sh
+ssh pi@raspberrypi
+tmux new -s log          # opens a shell inside a session named "log"
+smart-device-logger      # start the capture in that shell
+```
+
+Then, in order:
+
+| To | Do |
+| --- | --- |
+| Leave it running | `Ctrl-B` then `D` — detaches; the SSH connection can be closed |
+| Come back to it | `ssh pi@raspberrypi`, then `tmux attach -t log` |
+| See what is running | `tmux ls` |
+| Stop the capture | attach, then `Ctrl-C` — the clean stop, exit 0 |
+| Close the session too | `exit` in the session's shell, or `tmux kill-session -t log` |
+
+Attaching restores the stream and the status block as they were; the app never
+knows it was detached.
+
+Two details. `Ctrl-B` is tmux's own prefix key and the only keystroke the app
+does not receive — `Ctrl-C` still reaches it normally. And start the app inside
+the session rather than as `tmux new -s log 'smart-device-logger'`: with the
+command baked into the `new` line, the session disappears the moment the app
+exits and takes the reason with it.
 
 `tmux` does not survive a reboot. Logging from boot unattended wants a systemd
 unit, which is deliberately not part of this tool yet.
