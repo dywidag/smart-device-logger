@@ -119,3 +119,9 @@ Push a `v*` tag; `release.yml` runs the gate, builds the four static binaries
 and `checksums.txt`, and publishes them with install instructions. Rehearse any
 change to the build steps locally, and start the arm binaries under
 `qemu-arm-static` — link-clean is not the same as runnable.
+
+Publishing from the web UI is the same thing arriving in the other order: the
+release exists before the job runs. Publish attaches the binaries to it and
+rewrites the notes, so either route ends with a release whose download links
+resolve. Keep it that way — a release with no assets is worse than no release,
+because its own install instructions 404.

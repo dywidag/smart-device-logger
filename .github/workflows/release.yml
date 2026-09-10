@@ -69,6 +69,12 @@ jobs:
       # The install instructions ship with the release, because the person
       # doing the install is on a Pi over SSH, not reading the repository.
       # --generate-notes appends the commit list underneath them.
+      #
+      # Publishing a release from the web UI creates the tag, so this job can
+      # arrive to find the release already there and empty. That must end with
+      # the binaries attached, not with a failed run and download links that
+      # 404, so fill the existing release in instead of refusing it. The notes
+      # are rewritten either way: they name the assets this run just built.
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
@@ -90,8 +96,18 @@ jobs:
             echo 'Verify the download with `sha256sum -c checksums.txt`.'
           } > dist/notes.md
 
-          gh release create "$TAG" \
-            dist/smart-device-logger-linux-* dist/checksums.txt \
-            --title "$TAG" \
-            --notes-file dist/notes.md \
-            --generate-notes
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "release $TAG already exists; attaching this build to it"
+            gh release upload "$TAG" \
+              dist/smart-device-logger-linux-* dist/checksums.txt \
+              --clobber
+            gh release edit "$TAG" \
+              --title "$TAG" \
+              --notes-file dist/notes.md
+          else
+            gh release create "$TAG" \
+              dist/smart-device-logger-linux-* dist/checksums.txt \
+              --title "$TAG" \
+              --notes-file dist/notes.md \
+              --generate-notes
+          fi
