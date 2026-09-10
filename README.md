@@ -57,6 +57,29 @@ Alternatives, if the machine already has a current Go:
 `go install github.com/jonnyasmith/smart-device-logger@latest`, or
 cross-compile from the dev box and `scp` the binary over.
 
+## Running over SSH
+
+The tool stops when its terminal goes away, so a capture started over SSH ends
+when the connection does. Run it inside `tmux` (`sudo apt install tmux` if the
+Pi has none):
+
+```sh
+tmux new -s log          # a shell inside a session named "log"
+smart-device-logger      # start it in that shell
+```
+
+Detach with `Ctrl-B` then `D` — the app keeps logging and the SSH connection
+can be closed. `tmux attach -t log` picks the session back up with the stream
+and status block intact; `tmux ls` says what is running. `Ctrl-C` inside the
+session is still the clean stop.
+
+Start the app in the session rather than as `tmux new -s log 'smart-device-logger'`:
+with the command baked into the `new` line, the session disappears the moment
+the app exits and takes the reason with it.
+
+`tmux` does not survive a reboot. Logging from boot unattended wants a systemd
+unit, which is deliberately not part of this tool yet.
+
 ## Usage
 
 ```
