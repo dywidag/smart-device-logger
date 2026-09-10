@@ -69,6 +69,31 @@ Files are named `<prefix>-YYYY-MM-DD.log`. Writing continues into an existing
 day's file rather than truncating it, so restarting the tool never loses a
 session. Nothing is created on disk until the first line arrives.
 
+## Verifying without the hardware
+
+`cmd/fakedev` is a serial device with no serial device: it allocates a
+pseudo-terminal and hands back a real character device path that opens,
+configures and reads exactly like `/dev/ttyUSB0`. This is the verification
+loop — no FTDI lead, no `socat`, no root.
+
+```sh
+go run ./cmd/fakedev            # prints e.g. /dev/pts/7, then replays the real boot transcript
+go run ./cmd/fakedev -script endings    # A\rB\r\nC\n
+go run ./cmd/fakedev -script fragment   # MEMS........ with no terminator
+go run ./cmd/fakedev -script silence    # opens and says nothing
+go run ./cmd/fakedev -script garbage    # invalid UTF-8
+go run ./cmd/fakedev -script boot -unplug 10s
+```
+
+The transcript in `internal/fakedev/transcript.go` is the real VoidCellular
+v1-4-p2 boot, taken from the web logger's fixture. It reproduces every case
+the device actually produces: CRLF, a bare LF on the CSV header, lone CR in
+the AT exchange, an unterminated `MEMS........` fragment, a line whose
+terminator arrives in the next read, and a 311-character `+COPS` answer.
+
+`internal/fakedev` is also usable directly from a test — `fakedev.Open()`
+gives a `Device` you write to and `Unplug()` to hang the reader up.
+
 ## Layout
 
 Flat `package main`, one file per module — the same shape as the other Go tools
@@ -125,7 +150,7 @@ gofmt -l .                     # must print nothing
 go vet ./...
 go tool staticcheck ./...
 go test ./...
-go test -coverprofile=coverage.out ./... && go tool cover -func=coverage.out | tail -1
+go test -coverprofile=coverage.out . ./internal/... && go tool cover -func=coverage.out | tail -1
 go tool govulncheck ./...
 ```
 

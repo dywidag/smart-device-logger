@@ -41,14 +41,24 @@ A terminal tool for Linux and Raspberry Pi: pick the plugged-in USB serial devic
 
 ## Setting up to judge this
 
-Two checks need a real device; the rest can be graded with a virtual serial port, which is how they were designed to be graded.
+One check needs the FTDI lead. Every other check is graded against the fake
+device in this repository, which is a real character device backed by a
+pseudo-terminal — it opens, configures and reads exactly like `/dev/ttyUSB0`.
 
 ```sh
-socat -d -d pty,raw,echo=0,link=/tmp/ttyFAKE pty,raw,echo=0,link=/tmp/ttyFAKE-host &
-printf 'hello\r\n' > /tmp/ttyFAKE-host      # transmit to the tool reading /tmp/ttyFAKE
+go run ./cmd/fakedev                    # prints a device path; replays the real boot transcript
+go run ./cmd/fakedev -script silence    # opens and says nothing
+go run ./cmd/fakedev -script endings    # A\rB\r\nC\n
+go run ./cmd/fakedev -script fragment   # MEMS........ with no terminator
+go run ./cmd/fakedev -script garbage    # invalid UTF-8
+go run ./cmd/fakedev -script boot -unplug 10s
 ```
 
-Check 10 needs the FTDI device itself. Checks needing two devices (16) can use two `socat` pairs.
+The first line of stdout is the device path. Pass it as `--port`.
+
+Only check 10 (no reset on connect) needs the physical FTDI device, because
+it is about DTR asserting on a board that can reboot. Check 16 needs two
+devices: run `go run ./cmd/fakedev` twice.
 
 ## The bar
 
