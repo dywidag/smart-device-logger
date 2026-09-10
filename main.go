@@ -1,25 +1,26 @@
-// Command smart-device-logger streams data from a serial device, shows it on
-// screen, and appends it to a log file per day.
+// Command smart-device-logger streams data from a USB serial device, shows it
+// on screen, and appends it to a log file per day.
 //
-// This is the skeleton. Today it logs whatever arrives on standard input, so
-// the whole path — read, stamp, screen, daily file, clean shutdown — is real
-// and testable:
+//	smart-device-logger --port /dev/ttyUSB0
 //
-//	cat /dev/ttyUSB0 | smart-device-logger --log-dir ~/logs
-//
-// Device discovery, the picker UI and opening the port are the next pieces.
-// See README.md.
+// With one device attached, --port can be left out. Data lines go to stdout
+// and the day's file; everything else goes to stderr, so stdout can be piped.
+// Exit status is 0 after Ctrl-C, 1 on any error and 2 for bad usage.
 package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
+
+	"go.bug.st/serial"
 )
 
 // version lives in version.go, where the build stamping rule is.
@@ -29,46 +30,117 @@ func main() {
 	// leaves the second one to the default handler so a wedged read can
 	// still be killed.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
+	err := run(ctx, os.Args[1:], os.Stdout, os.Stderr)
+	stop()
+	os.Exit(exitStatus(err, os.Stderr))
+}
 
-	if err := run(ctx, os.Args[1:], os.Stdin, os.Stdout, os.Stderr); err != nil {
-		fmt.Fprintf(os.Stderr, "smart-device-logger: %v\n", err)
-		os.Exit(1)
+// usageError marks a bad command line, which exits 2 rather than 1 so a
+// script can tell a typo from a device that failed.
+type usageError struct{ err error }
+
+func (e usageError) Error() string { return e.err.Error() }
+func (e usageError) Unwrap() error { return e.err }
+
+// exitStatus maps run's result to the process exit code, printing the
+// error where one is due. The flag package has already printed usage
+// errors and help, so neither is repeated.
+func exitStatus(err error, stderr io.Writer) int {
+	var usage usageError
+	switch {
+	case err == nil, errors.Is(err, flag.ErrHelp):
+		return 0
+	case errors.As(err, &usage):
+		return 2
 	}
+	fmt.Fprintf(stderr, "smart-device-logger: %v\n", err)
+	return 1
 }
 
 // run holds everything main does apart from the exit code, so the tests can
 // drive the real entry point with their own arguments and streams.
-func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
+func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("smart-device-logger", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 
-	logDir := flags.String("log-dir", "logs", "directory to write daily log files into")
+	portName := flags.String("port", "", "serial device: a path, a bare name such as ttyUSB0, or a /dev/serial/by-id entry (default: the only device present)")
+	logDir := flags.String("log-dir", "", "directory to write daily log files into (default ~/.local/state/smart-device-logger)")
 	prefix := flags.String("log-prefix", "session", "leading part of each log file name")
+	readTimeout := flags.Duration("read-timeout", 200*time.Millisecond, "how long a read waits for data before checking for Ctrl-C")
 	showVersion := flags.Bool("version", false, "print the version and exit")
 
 	if err := flags.Parse(args); err != nil {
-		return err
+		if errors.Is(err, flag.ErrHelp) {
+			return err
+		}
+		return usageError{err}
+	}
+	if flags.NArg() > 0 {
+		err := fmt.Errorf("unexpected argument %q", flags.Arg(0))
+		fmt.Fprintln(stderr, err)
+		flags.Usage()
+		return usageError{err}
 	}
 	if *showVersion {
 		fmt.Fprintln(stdout, buildVersion())
 		return nil
 	}
 
+	path := *portName
+	if path == "" {
+		devices, err := discover(byIDDir, serial.GetPortsList)
+		if err != nil {
+			return err
+		}
+		chosen, err := pick(devices)
+		if err != nil {
+			return err
+		}
+		path = chosen.path
+		fmt.Fprintf(stderr, "using the only serial device present: %s\n", chosen)
+	} else {
+		path = devicePath(path)
+	}
+
+	port, err := openPort(path, *readTimeout)
+	if err != nil {
+		return err
+	}
+	defer port.Close()
+
 	daily := NewDailyWriter(*logDir, *prefix)
 	defer daily.Close()
 
-	fmt.Fprintf(stderr, "logging to %s (Ctrl-C to stop)\n", *logDir)
+	fmt.Fprintf(stderr, "%s open at 115200 8N1 (Ctrl-C to stop)\n", path)
 
-	// stream only notices cancellation between lines, and a quiet device can
-	// leave it blocked in a read for as long as it likes. Racing it against
-	// the context is what makes Ctrl-C answer at once. Abandoning the reader
-	// is safe: DailyWriter writes straight to the file with no buffer of its
-	// own, so nothing already read is lost when the process exits. Once a
-	// real port is opened, give it a read deadline so the read itself wakes
-	// up and this becomes belt and braces.
+	// The status block draws on stderr only when it is a terminal, so a
+	// pipe on stdout sees nothing but data lines and a redirected stderr
+	// sees no escape sequences at all.
+	term := terminal(stderr)
+	width := func() int { return 0 }
+	if f, ok := term.(*os.File); ok {
+		width = func() int { return terminalWidth(f.Fd()) }
+	}
+	logPath := func() string {
+		if p := daily.Path(); p != "" {
+			return p
+		}
+		return filepath.Join(daily.Dir(), fmt.Sprintf("%s-%s.log", *prefix, time.Now().Format(dayLayout)))
+	}
+	st := newStatus(term, width, time.Now, path, adapterName(path), "115200 8N1", logPath)
+	statusDone := make(chan struct{})
+	statusStopped := make(chan struct{})
+	go func() { st.run(statusDone); close(statusStopped) }()
+	defer func() { close(statusDone); <-statusStopped }()
+
+	// The port's read timeout means stream sees a cancelled context within
+	// one timeout of Ctrl-C. Closing the port as well wakes a read at once,
+	// and the bounded wait keeps the exit prompt even if the reader is
+	// mid-line. Nothing already written is lost: DailyWriter has no buffer.
 	done := make(chan error, 1)
-	go func() { done <- stream(ctx, io.MultiWriter(stdout, daily), stdin, time.Now) }()
+	go func() {
+		done <- stream(ctx, io.MultiWriter(st.screen(stdout), daily, st), st.reader(port), time.Now)
+	}()
 
 	select {
 	case err := <-done:
@@ -79,6 +151,11 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		}
 		return err
 	case <-ctx.Done():
+		port.Close()
+		select {
+		case <-done:
+		case <-time.After(time.Second):
+		}
 		return nil
 	}
 }

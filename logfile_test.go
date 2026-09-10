@@ -123,3 +123,62 @@ func TestDailyWriter(t *testing.T) {
 		}
 	})
 }
+
+func TestDefaultLogDir(t *testing.T) {
+	t.Run("uses XDG_STATE_HOME when set", func(t *testing.T) {
+		state := t.TempDir()
+		t.Setenv("XDG_STATE_HOME", state)
+
+		w := NewDailyWriter("", "session")
+		if got, want := w.Dir(), filepath.Join(state, "smart-device-logger"); got != want {
+			t.Errorf("Dir() = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("falls back to ~/.local/state and ignores a relative XDG_STATE_HOME", func(t *testing.T) {
+		home := t.TempDir()
+		t.Setenv("HOME", home)
+		t.Setenv("XDG_STATE_HOME", "relative/state")
+
+		w := NewDailyWriter("", "session")
+		want := filepath.Join(home, ".local", "state", "smart-device-logger")
+		if got := w.Dir(); got != want {
+			t.Errorf("Dir() = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("creates nothing under HOME until the first write, then lands there from any cwd", func(t *testing.T) {
+		home := t.TempDir()
+		t.Setenv("HOME", home)
+		t.Setenv("XDG_STATE_HOME", "")
+		t.Chdir(t.TempDir())
+		at := time.Date(2026, 3, 4, 9, 0, 0, 0, time.Local)
+
+		w := NewDailyWriter("", "session")
+		w.now = clock(&at)
+		defer w.Close()
+
+		if entries, _ := os.ReadDir(home); len(entries) != 0 {
+			t.Fatalf("HOME has %d entries before the first write, want 0", len(entries))
+		}
+		mustWrite(t, w, "line\n")
+
+		want := filepath.Join(home, ".local", "state", "smart-device-logger", "session-2026-03-04.log")
+		if got := readFile(t, want); got != "line\n" {
+			t.Errorf("file = %q, want %q", got, "line\n")
+		}
+	})
+
+	t.Run("reports a missing HOME on the first write, not at construction", func(t *testing.T) {
+		t.Setenv("HOME", "")
+		t.Setenv("XDG_STATE_HOME", "")
+
+		w := NewDailyWriter("", "session")
+		if _, err := w.Write([]byte("x\n")); err == nil {
+			t.Fatal("Write with no HOME succeeded, want an error")
+		}
+		if got := w.Path(); got != "" {
+			t.Errorf("Path() = %q, want empty", got)
+		}
+	})
+}

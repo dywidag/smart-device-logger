@@ -4,27 +4,24 @@ A terminal tool that streams data from a USB serial device, shows it on screen,
 and appends it to one log file per day. Think of a small, scriptable HTerm or
 PuTTY that keeps the record for you.
 
-## Status: skeleton
+## Status
 
-The repository, toolchain, verification loop and the **log path** are done. The
-**serial path** is not written yet.
-
-Working today:
+The tool works end to end: it opens the device, streams every line to the
+screen and to the day's log file, and keeps a small status block pinned under
+the stream while it runs.
 
 | Piece | State |
 | --- | --- |
 | Daily log files, with midnight rollover | done (`logfile.go`) |
-| Per-line timestamps, screen + file at once | done (`stream.go`) |
+| Per-line timestamps, screen + file at once | done (`stream.go`, `line.go`) |
 | Flags, version stamping, Ctrl-C shutdown | done (`main.go`) |
-| Serial port discovery and a picker UI | not started |
-| Opening a port (baud, data bits, parity) | not started |
-
-So the input is standard input for now, which makes the whole pipeline real and
-testable without a device attached:
+| Serial port discovery and opening | done (`device.go`) |
+| Status block on the terminal | done (`status.go`) |
 
 ```sh
 go build -o smart-device-logger .
-cat /dev/ttyUSB0 | ./smart-device-logger --log-dir ~/device-logs
+./smart-device-logger --port /dev/ttyUSB0
+./smart-device-logger                     # with exactly one device plugged in
 ```
 
 ## Install on a Raspberry Pi
@@ -44,7 +41,10 @@ smart-device-logger --version
 
 `checksums.txt` is attached to every release: `sha256sum -c checksums.txt`.
 
-Reading `/dev/ttyUSB0` needs the `dialout` group. Once, then log out and in:
+Reading `/dev/ttyUSB0` needs membership of the group that owns the device
+file — `dialout` on Raspberry Pi OS, `uucp` on Arch. The tool reads the group
+off the device and prints the exact command when the open is refused. Once,
+then log out and in:
 
 ```sh
 sudo usermod -aG dialout "$USER"
@@ -60,14 +60,31 @@ cross-compile from the dev box and `scp` the binary over.
 ## Usage
 
 ```
---log-dir     directory to write daily log files into (default "logs")
---log-prefix  leading part of each log file name (default "session")
---version     print the version and exit
+--port          serial device: a path, a bare name such as ttyUSB0, or a
+                /dev/serial/by-id entry (default: the only device present)
+--log-dir       directory to write daily log files into
+                (default ~/.local/state/smart-device-logger)
+--log-prefix    leading part of each log file name (default "session")
+--read-timeout  how long a read waits for data before checking for Ctrl-C (default 200ms)
+--version       print the version and exit
 ```
 
-Files are named `<prefix>-YYYY-MM-DD.log`. Writing continues into an existing
-day's file rather than truncating it, so restarting the tool never loses a
-session. Nothing is created on disk until the first line arrives.
+The port opens at 115200 8N1 with DTR and RTS dropped straight after the
+open, so a board that resets on DTR is not rebooted. With no `--port`, the
+one device present is used; with several, the tool exits 1 and lists them so
+the right one can be passed. Bad usage exits 2, Ctrl-C exits 0.
+
+Every line goes to stdout and to the day's file with an ISO-8601 stamp
+(`2026-09-10T14:00:01.000+01:00 ...`). `\r\n`, lone `\n` and lone `\r` all end
+a line; a fragment with no terminator is written after 200 ms of quiet.
+Invalid UTF-8 becomes U+FFFD. A two-line status block draws on stderr when
+that is a terminal, so `> capture.txt` gets data lines only, and a redirected
+stderr gets no escape sequences.
+
+Files are named `<prefix>-YYYY-MM-DD.log` after the local date. Writing
+continues into an existing day's file rather than truncating it, so restarting
+the tool never loses a session. Nothing is created on disk until the first
+line arrives.
 
 ## Verifying without the hardware
 
@@ -101,11 +118,16 @@ Go tools in this account. `internal/` and `cmd/` hold test scaffolding only.
 
 - `main.go` — flags, signal handling, wiring. `run` is the real entry point and
   takes its arguments and streams as parameters, so tests drive it directly.
+- `device.go` — discovery from `/dev/serial/by-id` and the library enumerator,
+  `--port` resolution, opening at 115200 8N1 with DTR/RTS dropped, and the
+  permission-denied message.
 - `stream.go` — `stream` copies a reader to a writer, one line at a time,
-  stamping each line. `record` renders a single line.
+  reading into a byte slice so a silent device is never end-of-stream.
+- `line.go` — the line splitter, idle flush, timestamp layout and `record`.
 - `logfile.go` — `DailyWriter`, an `io.WriteCloser` that opens
   `<dir>/<prefix>-YYYY-MM-DD.log` lazily and rolls over on the first write of a
   new local day. Safe for concurrent use.
+- `status.go` — the status block on stderr.
 - `version.go` — what `--version` reports, from the release ldflags stamp or
   `debug.ReadBuildInfo`.
 - `internal/fakedev`, `cmd/fakedev` — the fake serial device above.
@@ -117,26 +139,6 @@ against — 26 binary checks, an out-of-scope list, and three Unknowns nobody
 has decided. `MAP.md` beside it holds the reasoning for each check and the
 measured facts behind them. `PLAN.md` predates both; where they disagree, the
 map wins.
-
-## Next pieces
-
-1. **Discovery** — list candidate devices from sysfs, with the USB `VID:PID`,
-   manufacturer and product so the list names the device rather than its path.
-2. **Picker** — choose from the list when more than one device is present, and
-   accept `--port` to skip the prompt.
-3. **Open** — baud rate, data bits, parity, stop bits, read timeout, and
-   reconnect when the device is unplugged and returns.
-
-Likely dependencies, neither added yet because nothing uses them:
-
-- [`go.bug.st/serial`](https://pkg.go.dev/go.bug.st/serial) — serial port
-  access and USB enumeration. Pure Go on Linux, verified for amd64, arm64,
-  armv7 and armv6, so `CGO_ENABLED=0` holds and Pi binaries cross-compile.
-- [`bubbletea`](https://github.com/charmbracelet/bubbletea) — for the picker,
-  matching the other TUIs in this account.
-
-`stream` takes an `io.Reader`, so an open port drops straight in where
-`os.Stdin` is today.
 
 ## Development
 
