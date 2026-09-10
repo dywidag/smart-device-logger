@@ -27,6 +27,36 @@ go build -o smart-device-logger .
 cat /dev/ttyUSB0 | ./smart-device-logger --log-dir ~/device-logs
 ```
 
+## Install on a Raspberry Pi
+
+**No Go toolchain on the Pi.** Releases ship one static binary per Pi
+generation; the install is a download and a copy.
+
+Check which one you need — `uname -m` prints `aarch64` for arm64, `armv7l` for
+armv7, `armv6l` for armv6:
+
+```sh
+curl -fsSL -o smart-device-logger \
+  https://github.com/jonnyasmith/smart-device-logger/releases/latest/download/smart-device-logger-linux-arm64
+sudo install -m 0755 smart-device-logger /usr/local/bin/
+smart-device-logger --version
+```
+
+`checksums.txt` is attached to every release: `sha256sum -c checksums.txt`.
+
+Reading `/dev/ttyUSB0` needs the `dialout` group. Once, then log out and in:
+
+```sh
+sudo usermod -aG dialout "$USER"
+```
+
+Releases are cut by pushing a tag — `.github/workflows/release.yml` builds and
+uploads all four binaries. Nothing is built by hand.
+
+Alternatives, if the machine already has a current Go:
+`go install github.com/jonnyasmith/smart-device-logger@latest`, or
+cross-compile from the dev box and `scp` the binary over.
+
 ## Usage
 
 ```

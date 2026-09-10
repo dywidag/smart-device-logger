@@ -1,8 +1,9 @@
 # Build output
 /smart-device-logger
-/smart-device-logger.exe
-*.exe
 *.test
+
+# Release build output
+/dist/
 
 # Go
 /vendor/
@@ -16,8 +17,6 @@ coverage.*
 # Editor / OS
 .idea/
 .vscode/
-.DS_Store
-Thumbs.db
 
 # Agent scratch space
 .omp/

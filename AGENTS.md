@@ -108,11 +108,28 @@ an unchanged commit.
 `go tool staticcheck` and `go tool govulncheck` work from a bare Go install and
 CI needs no install step. Bump them with `go get -tool <path>@latest`.
 
-Build with the version stamped in:
+`go build` alone is enough. Do not pass `-ldflags` by hand: `version.go` reads
+`debug.ReadBuildInfo`, so a local build already reports its commit and whether
+the tree was dirty. `-X main.version=<tag>` is set by the release workflow and
+nowhere else.
+
+## Releases
+
+Push a tag; `.github/workflows/release.yml` does the rest — the gate, then
+static linux/arm64, armv7, armv6 and amd64 binaries plus `checksums.txt`,
+published with install instructions in the notes.
 
 ```sh
-go build -ldflags "-X main.version=$(git describe --tags --always)" -o smart-device-logger .
+git tag v0.1.0 && git push origin v0.1.0
 ```
+
+The Pi has no Go toolchain and is not getting one: it installs a released
+binary with `curl`. So a dependency that is not pure Go, or that does not
+cross-compile to arm, is not an option — the release cannot be produced.
+
+Rehearse a change to the build steps before tagging by running them locally,
+and run the arm binaries under `qemu-arm-static` to check they are not just
+link-clean but actually start.
 
 ## Conventions
 

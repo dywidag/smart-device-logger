@@ -264,18 +264,25 @@ memory flat in `ps`.
 
 ---
 
-## Phase 8 — Release
+## Phase 8 — Release — already built
 
-**Files:** `.goreleaser.yaml`, `.github/workflows/release.yml`.
+**Files:** `.github/workflows/release.yml`, `version.go`.
 
-Tag `v*` builds linux/amd64, linux/arm64, linux/armv7 and linux/armv6 and
-stamps `main.version` via ldflags. All pure Go, all cross-compiled from the
-ubuntu runner, no cgo anywhere.
+Pushing a `v*` tag runs the gate, cross-compiles linux/arm64, armv7, armv6 and
+amd64, writes `checksums.txt`, and publishes them with install instructions in
+the release notes. No goreleaser: four `go build` lines and `gh release create`
+are less to keep working than a tool with its own config format.
+
+The Pi installs with `curl` and needs no Go. `version.go` reports the tag, the
+commit and whether the tree was dirty, from the ldflags stamp for a release
+build and from `debug.ReadBuildInfo` otherwise.
 
 **Verification goal**
 
-Download the arm artefact for your Pi model onto the Pi itself — a machine
-with no Go toolchain — run `--version`, and log a real device with it.
+Push the first tag, then on a Pi with no Go toolchain: `curl` the arm binary,
+`sha256sum -c`, `--version` prints the tag, and it logs a real device. Until
+then the build steps are rehearsed locally and the arm binaries are checked
+under `qemu-arm-static`.
 
 ---
 

@@ -22,10 +22,7 @@ import (
 	"time"
 )
 
-// version is stamped at build time:
-//
-//	go build -ldflags "-X main.version=$(git describe --tags)" .
-var version = "dev"
+// version lives in version.go, where the build stamping rule is.
 
 func main() {
 	// NotifyContext turns the first Ctrl-C into a cancelled context, and
@@ -54,7 +51,7 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		return err
 	}
 	if *showVersion {
-		fmt.Fprintln(stdout, version)
+		fmt.Fprintln(stdout, buildVersion())
 		return nil
 	}
 

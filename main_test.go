@@ -43,8 +43,8 @@ func TestRun(t *testing.T) {
 			t.Fatalf("run: %v", err)
 		}
 
-		if got := strings.TrimSpace(stdout.String()); got != version {
-			t.Errorf("stdout = %q, want %q", got, version)
+		if got := strings.TrimSpace(stdout.String()); got != buildVersion() {
+			t.Errorf("stdout = %q, want %q", got, buildVersion())
 		}
 		if entries, _ := filepath.Glob(filepath.Join(dir, "*.log")); len(entries) != 0 {
 			t.Errorf("wrote %v, want no log files", entries)

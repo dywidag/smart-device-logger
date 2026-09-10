@@ -1,0 +1,97 @@
+name: Release
+
+# Push a tag and the Pi has something to curl:
+#
+#   git tag v0.1.0 && git push origin v0.1.0
+#
+# Bare binaries, not tarballs — the install on the Pi is one curl and a chmod,
+# with no unpacking step to get wrong over SSH.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "existing tag to build"
+        required: true
+
+permissions:
+  contents: write # required to create the release and upload assets
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          fetch-depth: 0 # tags, so the build can describe itself
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # The gate runs here too. A tag that cannot pass the same checks as a
+      # pull request has no business on a Pi.
+      - name: Verify
+        run: |
+          test -z "$(gofmt -l .)"
+          go vet ./...
+          go tool staticcheck ./...
+          go test ./...
+
+      # One static binary per Pi generation, plus amd64 for a dev box. No cgo,
+      # so all four cross-compile from this runner.
+      - name: Build
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          mkdir -p dist
+          build() {
+            arch=$1 arm=$2 suffix=$3
+            echo "building linux/$suffix"
+            CGO_ENABLED=0 GOOS=linux GOARCH="$arch" GOARM="$arm" \
+              go build -trimpath -ldflags "-s -w -X main.version=$TAG" \
+              -o "dist/smart-device-logger-linux-$suffix" .
+          }
+          build arm64 ""  arm64   # Pi 3/4/5 and Zero 2 W on a 64-bit OS
+          build arm   7   armv7   # Pi 2/3/4 on a 32-bit OS
+          build arm   6   armv6   # Pi 1 and Zero
+          build amd64 ""  amd64   # x86 dev box
+
+      # One file the installer can verify against, rather than trusting the
+      # download silently.
+      - name: Checksums
+        working-directory: dist
+        run: sha256sum smart-device-logger-linux-* > checksums.txt
+
+      # The install instructions ship with the release, because the person
+      # doing the install is on a Pi over SSH, not reading the repository.
+      # --generate-notes appends the commit list underneath them.
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          base="https://github.com/$REPO/releases/download/$TAG"
+          {
+            echo "Install on a Raspberry Pi — no Go toolchain needed."
+            echo
+            echo 'Check `uname -m` first: `aarch64` is arm64, `armv7l` is armv7, `armv6l` is armv6.'
+            echo
+            echo '```sh'
+            echo "curl -fsSL -o smart-device-logger $base/smart-device-logger-linux-arm64"
+            echo "sudo install -m 0755 smart-device-logger /usr/local/bin/"
+            echo "smart-device-logger --version"
+            echo '```'
+            echo
+            echo 'Verify the download with `sha256sum -c checksums.txt`.'
+          } > dist/notes.md
+
+          gh release create "$TAG" \
+            dist/smart-device-logger-linux-* dist/checksums.txt \
+            --title "$TAG" \
+            --notes-file dist/notes.md \
+            --generate-notes
