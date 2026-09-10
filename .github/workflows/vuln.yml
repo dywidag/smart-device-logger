@@ -1,0 +1,32 @@
+name: Vulnerabilities
+
+# A new advisory can affect an unchanged commit, so this runs on a schedule as
+# well as on pull requests. It is a separate workflow so a dependency advisory
+# is not mistaken for a code failure in CI.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "17 6 * * 1" # Mondays, 06:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  govulncheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # govulncheck is pinned as a tool directive in go.mod. It fails the job
+      # only for vulnerabilities this code actually calls; ones that merely sit
+      # in a required module are reported in the summary without failing.
+      - name: govulncheck
+        run: go tool govulncheck ./...

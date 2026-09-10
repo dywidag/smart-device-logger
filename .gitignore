@@ -1,1 +1,28 @@
+# Build output
+/smart-device-logger
+/smart-device-logger.exe
+*.exe
+*.test
+
+# Go
+/vendor/
+*.out
+coverage.*
+
+# Captured device data — logs are runtime output, never source
+/logs/
+*.log
+
+# Editor / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Agent scratch space
 .omp/
+
+# Personal tooling — Go alone is enough to build and verify this repo, so one
+# contributor's tool manager stays out of it. Keep your own mise.toml locally.
+mise.toml
+.mise.toml

@@ -1,0 +1,86 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # go vet does not check formatting, and gofmt -l exits 0 even when it
+      # lists files — so test the output explicitly.
+      - name: Format
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "Not gofmt-clean:"
+            echo "$unformatted"
+            gofmt -d .
+            exit 1
+          fi
+
+      - name: Vet
+        run: go vet ./...
+
+      # staticcheck is pinned as a tool directive in go.mod.
+      - name: Lint
+        run: go tool staticcheck ./...
+
+      - name: Tidy
+        run: |
+          go mod tidy
+          git diff --exit-code -- go.mod go.sum
+
+      - name: Build
+        run: go build ./...
+
+      # -race needs cgo, which is why it runs here and not in the local loop.
+      - name: Test
+        run: go test -race ./...
+
+      # A ratchet, not a target. Raise COVER_FLOOR only after the suite clears
+      # the new level. Keep it in step with the verification loop in AGENTS.md.
+      - name: Coverage floor
+        env:
+          COVER_FLOOR: "80.0"
+        run: |
+          go test -coverprofile=coverage.out ./... > /dev/null
+          total=$(go tool cover -func=coverage.out | awk '/^total:/ {print $3}' | tr -d '%')
+          echo "coverage ${total}% (floor ${COVER_FLOOR}%)"
+          awk -v t="$total" -v f="$COVER_FLOOR" 'BEGIN { if (t+0 < f+0) { print "below the floor"; exit 1 } }'
+
+  # The tool is meant to run wherever the USB device is plugged in, so prove
+  # every target still compiles. Cheap while the code is pure Go.
+  cross-build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        goos: [windows, linux, darwin]
+        goarch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
+        env:
+          CGO_ENABLED: "0"
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: go build ./...
