@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Prototype — status line during a long silence</title>
+<style>
+  body { background:#12141a; color:#d8dee9; font:14px/1.5 system-ui, sans-serif; margin:0; padding:32px; }
+  h1 { font-size:18px; font-weight:600; margin:0 0 4px; }
+  p.note { color:#8b93a7; max-width:70ch; margin:0 0 28px; }
+  section { margin-bottom:28px; }
+  h2 { font-size:14px; margin:0 0 6px; color:#88c0d0; }
+  .why { color:#8b93a7; margin:0 0 8px; max-width:70ch; }
+  pre { background:#0b0d12; border:1px solid #262b36; border-radius:6px; padding:14px 16px;
+        font:13px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; color:#d8dee9;
+        overflow-x:auto; margin:0; }
+  .dim { color:#6b7280; }
+  .run { color:#a3be8c; font:12px ui-monospace, monospace; margin-top:6px; }
+</style>
+</head>
+<body>
+
+<h1>Status line during a 30-minute silence</h1>
+<p class="note">Throwaway prototype. The device sends two lines, goes quiet for 29 minutes,
+then sends one more. Each pane shows what the terminal looks like <em>during</em> the quiet
+stretch. Run any of them live with the command underneath.</p>
+
+<section>
+  <h2>Variant 1 — one-line footer, redrawn in place</h2>
+  <p class="why">The stream scrolls normally; a single dim line pinned at the bottom counts up.</p>
+<pre>2026-09-10T14:00:01.000+01:00 BOOT OK
+2026-09-10T14:00:02.000+01:00 TEMP=21.4 HUM=48
+<span class="dim">⏳ 14m since last line · 2 lines · 23 B · session-2026-09-10.log</span></pre>
+  <p class="run">go run /tmp/proto/main.go 1</p>
+</section>
+
+<section>
+  <h2>Variant 2 — two-line block, labelled</h2>
+  <p class="why">Adds the port, the adapter, the line settings and the full log path. More to read,
+  nothing to guess.</p>
+<pre>2026-09-10T14:00:01.000+01:00 BOOT OK
+2026-09-10T14:00:02.000+01:00 TEMP=21.4 HUM=48
+<span class="dim">┌ /dev/ttyUSB0  FTDI TTL232R  115200 8N1
+└ waiting 14m · 2 lines · 23 B · ~/.local/state/smart-device-logger/session-2026-09-10.log</span></pre>
+  <p class="run">go run /tmp/proto/main.go 2</p>
+</section>
+
+<section>
+  <h2>Variant 3 — no status line; a marker in the stream every 10 minutes</h2>
+  <p class="why">Nothing is redrawn, so the marker survives a pipe and lands in the log file too.
+  You lose the live counter.</p>
+<pre>2026-09-10T14:00:01.000+01:00 BOOT OK
+2026-09-10T14:00:02.000+01:00 TEMP=21.4 HUM=48
+<span class="dim">-- no data for 10m --
+-- no data for 20m --</span>
+2026-09-10T14:00:03.000+01:00 TEMP=21.6 HUM=47</pre>
+  <p class="run">go run /tmp/proto/main.go 3</p>
+</section>
+
+</body>
+</html>
