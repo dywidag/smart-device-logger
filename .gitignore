@@ -21,6 +21,9 @@ coverage.*
 # Agent scratch space
 .omp/
 
+# The grading bar and its working notes stay on the machine that uses them
+/.wayfinder/
+
 # Personal tooling — Go alone is enough to build and verify this repo, so one
 # contributor's tool manager stays out of it. Keep your own mise.toml locally.
 mise.toml
