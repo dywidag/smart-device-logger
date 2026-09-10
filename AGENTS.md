@@ -94,7 +94,7 @@ Three checks are **CI-only**, deliberately:
 
 - `go test -race ./...` — the race detector needs cgo.
 - `go mod tidy` leaving no diff.
-- Cross-compilation of windows/linux/darwin × amd64/arm64.
+- Cross-compilation of the Linux targets: amd64, arm64, armv7, armv6.
 
 `govulncheck` also runs weekly in `vuln.yml`, because a new advisory can affect
 an unchanged commit.
@@ -122,5 +122,11 @@ go build -ldflags "-X main.version=$(git describe --tags --always)" -o smart-dev
   meaning anything.
 - Do not add a task runner, wrapper script, or tool manager as a required step.
   Go alone must be enough to build, test and verify this repo.
-- Keep the binary pure Go (`CGO_ENABLED=0`) so it cross-compiles to every
-  machine a device might be plugged into. Choose serial libraries accordingly.
+- **Linux only.** The tool runs on Raspberry Pis and on an x86 Linux dev box.
+  Do not add Windows or macOS support, build targets, or conditional code, and
+  do not write `COM3` in an example.
+- Keep the binary pure Go (`CGO_ENABLED=0`) so a Pi binary cross-compiles from
+  the dev box with no toolchain to install. `go.bug.st/serial` and its
+  `enumerator` package are pure Go on Linux — verified: `CGO_ENABLED=0
+  GOOS=linux` builds `enumerator.GetDetailedPortsList`. Choose any further
+  serial dependency the same way.

@@ -16,7 +16,7 @@ CI with race detector, coverage floor and a cross-build matrix.
 
 Not done: everything to do with a serial port. Input is `os.Stdin`.
 
-## Decisions to make before phase 1
+## Settled before phase 1
 
 ### Library
 
@@ -39,22 +39,19 @@ Use [`go.bug.st/serial`](https://pkg.go.dev/go.bug.st/serial) v1.8.0
 makes cancellation prompt. That replaces the goroutine race in `run` with a
 real wake-up.
 
-### The cgo problem — decide in phase 1, not later
+### Target: Linux only — settled
 
-`enumerator` needs the IOKit framework on macOS, so it **requires cgo there**
-and cannot be cross-compiled to `darwin/*`. `AGENTS.md` currently requires
-`CGO_ENABLED=0` everywhere. Both cannot hold. Three ways out:
+Raspberry Pis with the device on USB, plus an x86 Linux dev box. No Windows,
+no macOS. Every phase below assumes `/dev/tty*` naming, sysfs, and `dialout`.
 
-| Option | Cost |
-| --- | --- |
-| **A. Use `enumerator`, build darwin on a `macos-latest` runner with cgo** | CI matrix grows a runner; no cross-compile to darwin |
-| **B. Use `GetPortsList` only, pure Go** | Device list is bare paths — `/dev/ttyUSB0`, `COM3` — with no product name to choose by |
-| **C. `enumerator` behind a build tag, `GetPortsList` as the fallback** | Two discovery paths to test, and the macOS build is the one that gets less use |
+`enumerator` is **pure Go on Linux** — verified by building
+`enumerator.GetDetailedPortsList` with `CGO_ENABLED=0 GOOS=linux` for amd64
+and for arm. So the full device metadata (`VID:PID`, manufacturer, product,
+serial number) that makes the picker worth having costs nothing: no cgo, no
+toolchain on the Pi, a binary cross-compiled from the dev box and copied over.
 
-**Recommendation: A.** The whole point of the picker is "which of these is my
-device", and `VID:PID Manufacturer Product` is the only thing that answers it.
-Take the cgo cost on one platform and update the `CGO_ENABLED=0` rule in
-`AGENTS.md` to say "linux and windows", so the documented rule stays true.
+The CI matrix builds linux/amd64, linux/arm64, linux/armv7 and linux/armv6, so
+a Pi 5, a 32-bit Pi OS on a 3 or 4, and a Pi 1 or Zero are all covered.
 
 ### Linux permissions
 
@@ -72,7 +69,7 @@ most common first-run failure. The tool must say so by name rather than print
 
 ```go
 type Device struct {
-    Name         string // /dev/ttyUSB0, COM3
+    Name         string // /dev/ttyUSB0, /dev/ttyACM0
     IsUSB        bool
     VID, PID     string
     SerialNumber string
@@ -271,14 +268,14 @@ memory flat in `ps`.
 
 **Files:** `.goreleaser.yaml`, `.github/workflows/release.yml`.
 
-Tag `v*` builds windows/linux/darwin × amd64/arm64 and stamps `main.version`
-via ldflags. Darwin needs cgo per the phase-1 decision, so it builds on a macOS
-runner.
+Tag `v*` builds linux/amd64, linux/arm64, linux/armv7 and linux/armv6 and
+stamps `main.version` via ldflags. All pure Go, all cross-compiled from the
+ubuntu runner, no cgo anywhere.
 
 **Verification goal**
 
-Download the artefact for a machine you have not built on, run `--version`, and
-log a real device with it.
+Download the arm artefact for your Pi model onto the Pi itself — a machine
+with no Go toolchain — run `--version`, and log a real device with it.
 
 ---
 
@@ -315,15 +312,16 @@ Someone who has never seen the tool can:
 5. Leave it running for a week and get seven files, with any unplug and replug
    marked in them.
 
-Each of those five is a manual test to run before tagging, on Linux and on
-Windows.
+Each of those five is a manual test to run before tagging, on the Pi. The dev
+box is for building and for the unit suite; the Pi is where the acceptance
+test counts, because that is where the device is plugged in.
 
 ## Risks
 
 | Risk | Handling |
 | --- | --- |
-| cgo on macOS conflicts with the pure-Go rule | Decide in phase 1, then correct `AGENTS.md` |
+| A dependency is not pure Go, or not built for arm | Every target is in the CI matrix, so it fails at build time on the commit that adds it |
 | No hardware for CI | Every seam takes an injected reader or lister; hardware checks stay manual and are recorded in commit messages |
-| Windows behaves differently — COM naming, no `dialout` | Run the phase 2, 3 and 4 verification goals on Windows too, not only Linux |
+| The Pi is slower than the dev box | Run the phase 5 throughput goal on the Pi, not on the dev box — a Pi Zero and a Ryzen are not the same tool |
 | High-rate devices outrun the terminal | Phase 5 throttles the status line and phase 5's goal measures it |
 | Silent data loss on a full disk | Phase 7 makes it a loud failure |

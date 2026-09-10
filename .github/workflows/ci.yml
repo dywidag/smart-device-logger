@@ -61,15 +61,22 @@ jobs:
           echo "coverage ${total}% (floor ${COVER_FLOOR}%)"
           awk -v t="$total" -v f="$COVER_FLOOR" 'BEGIN { if (t+0 < f+0) { print "below the floor"; exit 1 } }'
 
-  # The tool is meant to run wherever the USB device is plugged in, so prove
-  # every target still compiles. Cheap while the code is pure Go.
+  # This runs on Raspberry Pis with the device on USB, plus an x86 dev box.
+  # Linux only — no Windows, no macOS. The Pi arm variants are all built
+  # because a Pi 5 is arm64, a 32-bit Pi OS on a 3/4 is armv7, and a Pi 1 or
+  # Zero is armv6. Cheap while the code is pure Go.
   cross-build:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        goos: [windows, linux, darwin]
-        goarch: [amd64, arm64]
+        include:
+          - goarch: amd64
+          - goarch: arm64
+          - goarch: arm
+            goarm: "7"
+          - goarch: arm
+            goarm: "6"
     steps:
       - uses: actions/checkout@v7
 
@@ -78,9 +85,10 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
+      - name: Build linux/${{ matrix.goarch }}${{ matrix.goarm }}
         env:
           CGO_ENABLED: "0"
-          GOOS: ${{ matrix.goos }}
+          GOOS: linux
           GOARCH: ${{ matrix.goarch }}
+          GOARM: ${{ matrix.goarm }}
         run: go build ./...

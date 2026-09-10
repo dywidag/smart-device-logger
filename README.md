@@ -54,8 +54,8 @@ in this account.
 
 ## Next pieces
 
-1. **Discovery** — list candidate devices. On Linux that is `/dev/serial/by-id`
-   and `/sys/class/tty/*/device`; portable code usually calls a library.
+1. **Discovery** — list candidate devices from sysfs, with the USB `VID:PID`,
+   manufacturer and product so the list names the device rather than its path.
 2. **Picker** — choose from the list when more than one device is present, and
    accept `--port` to skip the prompt.
 3. **Open** — baud rate, data bits, parity, stop bits, read timeout, and
@@ -63,8 +63,9 @@ in this account.
 
 Likely dependencies, neither added yet because nothing uses them:
 
-- [`go.bug.st/serial`](https://pkg.go.dev/go.bug.st/serial) — pure-Go serial
-  port access and enumeration, so `CGO_ENABLED=0` still holds.
+- [`go.bug.st/serial`](https://pkg.go.dev/go.bug.st/serial) — serial port
+  access and USB enumeration. Pure Go on Linux, verified for amd64, arm64,
+  armv7 and armv6, so `CGO_ENABLED=0` holds and Pi binaries cross-compile.
 - [`bubbletea`](https://github.com/charmbracelet/bubbletea) — for the picker,
   matching the other TUIs in this account.
 
@@ -73,9 +74,19 @@ Likely dependencies, neither added yet because nothing uses them:
 
 ## Development
 
+**Target: Linux only** — Raspberry Pis with the device on USB, and an x86
+Linux dev box to build from. No Windows, no macOS.
+
 Go is the only requirement. The version comes from the `go` directive in
 `go.mod`, and `GOTOOLCHAIN=auto` fetches it. `staticcheck` and `govulncheck` are
 `tool` directives, so no install step is needed.
+
+Build for a Pi from the dev box:
+
+```sh
+CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o smart-device-logger .   # Pi 4/5, 64-bit
+CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7 go build -o smart-device-logger .  # 32-bit Pi OS
+```
 
 Run all six before every commit:
 
@@ -89,5 +100,6 @@ go tool govulncheck ./...
 ```
 
 `.github/workflows/ci.yml` is the source of truth for that list, and adds the
-race detector, `go mod tidy` cleanliness, a coverage floor, and a
-cross-compilation matrix. See [AGENTS.md](AGENTS.md) for the conventions.
+race detector, `go mod tidy` cleanliness, a coverage floor, and a build of
+every Linux target (amd64, arm64, armv7, armv6). See [AGENTS.md](AGENTS.md)
+for the conventions, and [PLAN.md](PLAN.md) for the route to v1.0.
