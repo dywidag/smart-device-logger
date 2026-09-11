@@ -121,9 +121,10 @@ open, so a board that resets on DTR is not rebooted. With no `--port`, the
 one device present is used; with several, the tool exits 1 and lists them so
 the right one can be passed. Bad usage exits 2, Ctrl-C exits 0.
 
-Every line goes to stdout and to the day's file with an ISO-8601 stamp
-(`2026-09-10T14:00:01.000+01:00 ...`). `\r\n`, lone `\n` and lone `\r` all end
-a line; a fragment with no terminator is written after 200 ms of quiet.
+Every line goes to stdout and to the day's file with a local wall-clock stamp
+using Go's `2006-01-02 15:04:05` layout (`2026-09-11 09:02:12 ...`). `\r\n`,
+lone `\n` and lone `\r` all end a line; a fragment with no terminator is written
+after 200 ms of quiet.
 Invalid UTF-8 becomes U+FFFD. A two-line status block draws on stderr when
 that is a terminal, so `> capture.txt` gets data lines only, and a redirected
 stderr gets no escape sequences.
@@ -148,8 +149,8 @@ autosuspend blip, a nudged cable — and by default the tool waits for it to
 come back rather than exiting. The gap is explained in the log itself:
 
 ```
-2026-09-10T17:52:20.565Z --- device disconnected: /dev/ttyUSB0 (read device: Port has been closed) ---
-2026-09-10T17:52:22.326Z --- reconnected to /dev/ttyUSB1 ---
+2026-09-11 17:52:20 --- device disconnected: /dev/ttyUSB0 (read device: Port has been closed) ---
+2026-09-11 17:52:22 --- reconnected to /dev/ttyUSB1 ---
 ```
 
 Retries back off from 250 ms to 5 s and continue for as long as the device is

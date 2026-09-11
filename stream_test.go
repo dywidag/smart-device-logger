@@ -17,7 +17,7 @@ func fixedClock() func() time.Time {
 	return func() time.Time { return at }
 }
 
-const stamp = "2026-03-04T09:00:00.000Z"
+const stamp = "2026-03-04 09:00:00"
 
 // steppedClock advances by step on every reading, so idle gaps are made by
 // the number of reads rather than by sleeping.
@@ -132,8 +132,8 @@ func TestStream(t *testing.T) {
 			t.Fatalf("stream: %v", err)
 		}
 
-		want := "2026-03-04T09:00:00.750+01:00 MEMS........\n" +
-			"2026-03-04T09:00:01.050+01:00 OK\n"
+		want := "2026-03-04 09:00:00 MEMS........\n" +
+			"2026-03-04 09:00:01 OK\n"
 		if out.String() != want {
 			t.Errorf("output = %q, want %q", out.String(), want)
 		}
@@ -147,20 +147,20 @@ func TestStream(t *testing.T) {
 			t.Fatalf("stream: %v", err)
 		}
 
-		want := "2026-03-04T09:00:00.200+01:00 MEMS....\n"
+		want := "2026-03-04 09:00:00 MEMS....\n"
 		if out.String() != want {
 			t.Errorf("output = %q, want %q", out.String(), want)
 		}
 	})
 
-	t.Run("stamps carry the local UTC offset", func(t *testing.T) {
+	t.Run("stamps use local date and time without a zone suffix", func(t *testing.T) {
 		var out bytes.Buffer
 
 		if err := stream(context.Background(), &out, strings.NewReader("x\n"), steppedClock(time.Second)); err != nil {
 			t.Fatalf("stream: %v", err)
 		}
 
-		if want := "2026-03-04T09:00:02.000+01:00 x\n"; out.String() != want {
+		if want := "2026-03-04 09:00:02 x\n"; out.String() != want {
 			t.Errorf("output = %q, want %q", out.String(), want)
 		}
 	})

@@ -6,9 +6,8 @@ import (
 	"unicode/utf8"
 )
 
-// stampLayout is the per-line timestamp. Milliseconds and the offset are kept
-// because two devices logged on one machine are compared by wall clock.
-const stampLayout = "2006-01-02T15:04:05.000Z07:00"
+// stampLayout is the per-line timestamp in local wall-clock time.
+const stampLayout = "2006-01-02 15:04:05"
 
 // idleFlush is how long an unterminated fragment waits before it is logged
 // anyway. The device leaves selftest steps such as MEMS........ hanging
